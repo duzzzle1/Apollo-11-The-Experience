@@ -10,48 +10,20 @@
     "updated": "2026-10-10T16:32:36.841Z",
     "score": [
       {
-        "name": "MH",
-        "cls": "3",
-        "score": 10,
-        "total": 10,
-        "time": 29.6
-      },
-      {
         "name": "محمد حمد",
         "cls": "3",
         "score": 8,
         "total": 10,
         "time": 29.8
-      },
-      {
-        "name": "MH2",
-        "cls": "3",
-        "score": 7,
-        "total": 10,
-        "time": 51.7
       }
     ],
     "time": [
       {
-        "name": "MH",
-        "cls": "3",
-        "score": 10,
-        "total": 10,
-        "time": 29.6
-      },
-      {
         "name": "محمد حمد",
         "cls": "3",
         "score": 8,
         "total": 10,
         "time": 29.8
-      },
-      {
-        "name": "MH2",
-        "cls": "3",
-        "score": 7,
-        "total": 10,
-        "time": 51.7
       }
     ]
   }
