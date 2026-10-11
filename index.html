@@ -3728,7 +3728,7 @@ function loadStudentsLocal(){
    or students.json from the site itself). The copy in this browser is only a fallback when nothing online
    can be reached, and it is overwritten by the online list every time it loads. */
 let studentsReadyResolve;
-const studentsReady = new Promise(res => { studentsReadyResolve = res; });
+let studentsReady = new Promise(res => { studentsReadyResolve = res; });
 
 async function fetchRemoteStudents(){
 
@@ -4033,8 +4033,8 @@ document
    DELETE DATABASE
    1) empties the in-memory list
    2) removes the browser (localStorage) copy
-   (students.json is only ever downloaded through Export,
-   so there is no file to clear and no file picker.)
+   3) loads the online list again (the online database itself is not touched:
+      remove students there with removeStudents in the Google script)
 */
 async function wipeStudentsDatabase(){
 
@@ -4054,6 +4054,11 @@ async function wipeStudentsDatabase(){
     }
 
     showAdminToast(t("dbDeleted"));
+
+    // The online list (GitHub / sheet) is the real database: load it again right away,
+    // so a student who is in it is still recognised ("Welcome back") without refreshing the page.
+    studentsReady = new Promise(res => { studentsReadyResolve = res; });
+    loadStudentsFile().catch(() => {});
 
 }
 
