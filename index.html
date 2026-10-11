@@ -3638,10 +3638,20 @@ let studentFlowBusy = false;
 
 function normalizeStudentText(text){
 
+    // Two entries are "the same student" even if one was typed on a different keyboard:
+    // invisible direction marks, tatweel and diacritics, Arabic/Persian digits, alef/yeh/teh-marbuta
+    // variants, "/" vs "\\" in classes and extra spaces are all ignored.
     return String(text || "")
         .normalize("NFKC")
+        .replace(/[\u00AD\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g, "")
         .replace(/[\u064B-\u065F\u0670\u0640]/g, "")
-        .replace(/[\u0622\u0623\u0625]/g, "\u0627")
+        .replace(/[\u0660-\u0669]/g, c => String(c.charCodeAt(0) - 0x660))
+        .replace(/[\u06F0-\u06F9]/g, c => String(c.charCodeAt(0) - 0x6F0))
+        .replace(/[\u0622\u0623\u0625\u0671]/g, "\u0627")
+        .replace(/[\u0649\u06CC\u0626]/g, "\u064A")
+        .replace(/\u0624/g, "\u0648")
+        .replace(/\u0629/g, "\u0647")
+        .replace(/[\\\/\u2044\uFF0F]/g, "/")
         .replace(/\s+/g, " ")
         .trim()
         .toLowerCase();
@@ -3655,6 +3665,13 @@ function studentKey(name, studentClass){
         normalizeStudentText(studentClass);
 
 }
+
+// console helper: APOLLO_STUDENTS() lists what the game knows, with character codes (to spot invisible differences)
+window.APOLLO_STUDENTS = () => studentsDB.map(s => ({
+    name:s.name, class:s.class,
+    nameCodes:[...s.name].map(c => c.charCodeAt(0).toString(16)).join(" "),
+    classCodes:[...s.class].map(c => c.charCodeAt(0).toString(16)).join(" ")
+}));
 
 function findStudent(name, studentClass){
 
@@ -3730,29 +3747,29 @@ function loadStudentsLocal(){
 let studentsReadyResolve;
 let studentsReady = new Promise(res => { studentsReadyResolve = res; });
 
-async function fetchRemoteStudents(){
+async function studentsFromScript(){
 
-    // wait (briefly) for the quiz module, which knows the Google script address
+    // the Google script address lives in the quiz module: wait (briefly) for it
     for(let i = 0; i < 60 && !window.QuizBoard; i++){
         await new Promise(r => setTimeout(r, 50));
     }
 
-    let fromScript = null;
-
     try{
         if(window.QuizBoard && window.QuizBoard.fetchStudents){
-            fromScript = await window.QuizBoard.fetchStudents();   // {source, students} | null
+            return await window.QuizBoard.fetchStudents();   // {source, students} | null
         }
     }
-    catch(err){}
-
-    if(fromScript && fromScript.source === "github"){
-        return fromScript.students;
+    catch(err){
+        console.warn("Student list: the Google script could not be reached:", err);
     }
 
-    // students.json from the site (GitHub Pages can lag a minute behind)
-    let list = null;
+    return null;
 
+}
+
+async function studentsFromFile(){
+
+    // students.json on the site (fast; GitHub Pages can lag a minute behind)
     try{
 
         const response =
@@ -3760,7 +3777,8 @@ async function fetchRemoteStudents(){
 
         if(response.ok){
             const data = parseStudentsText(await response.text());
-            list = Array.isArray(data) ? data : (data && data.students);
+            const list = Array.isArray(data) ? data : (data && data.students);
+            return Array.isArray(list) ? list : null;
         }
 
     }
@@ -3768,11 +3786,7 @@ async function fetchRemoteStudents(){
         // Opened from disk / file missing
     }
 
-    if(Array.isArray(list)){
-        return list.concat(fromScript ? fromScript.students : []);
-    }
-
-    return fromScript ? fromScript.students : null;
+    return null;
 
 }
 
@@ -3790,30 +3804,61 @@ function pendingNewStudents(){
 
 }
 
+function applyStudents(list, replace, source){
+
+    if(!Array.isArray(list)){
+        return false;
+    }
+
+    if(replace){
+        studentsDB.length = 0;
+    }
+
+    mergeStudents(list);
+    mergeStudents(pendingNewStudents());
+
+    window.APOLLO_STUDENT_SOURCE = source;
+
+    saveStudentsLocal();
+
+    return true;
+
+}
+
+/* Both online sources are asked at the same time. Whichever answers first fills the list (so a slow Google script
+   never holds the sign-in up); the Google script, which reads GitHub directly, then replaces it with the
+   freshest copy. The browser copy is only used when nothing online can be reached. */
 async function loadStudentsFile(){
 
-    try{
+    let authoritative = false;
 
-        const remote = await fetchRemoteStudents();
+    const fileJob = studentsFromFile().then(list => {
+        if(!authoritative && applyStudents(list, true, "students.json on the site")){
+            studentsReadyResolve();
+        }
+    });
 
-        if(Array.isArray(remote)){
+    const scriptJob = studentsFromScript().then(r => {
 
-            studentsDB.length = 0;
-
-            mergeStudents(remote);
-            mergeStudents(pendingNewStudents());
-
-            saveStudentsLocal();
-
+        if(!r){
+            return;
         }
 
-    }
-    catch(err){
-        // offline: the local copy is used
-    }
-    finally{
+        if(r.source === "github"){
+            authoritative = true;
+            applyStudents(r.students, true, "google-script (github)");
+        }
+        else{
+            applyStudents(r.students, false, "google-script (sheet)");
+        }
+
         studentsReadyResolve();
-    }
+
+    });
+
+    await Promise.allSettled([ fileJob, scriptJob ]);
+
+    studentsReadyResolve();
 
 }
 
@@ -4237,6 +4282,25 @@ async function submitStudentFlow(){
 
     // Already in the database?  -> returning student
     let student = findStudent(name, studentClass);
+
+    // Not in the list this page loaded? Ask the online database once more before registering a new student
+    // (the list may have failed to load, or the student may have signed up on another device a minute ago).
+    if(!student){
+
+        try{
+            await Promise.race([
+                Promise.all([ studentsFromFile(), studentsFromScript() ]).then(([ f, s ]) => {
+                    if(Array.isArray(f)){ mergeStudents(f); }
+                    if(s && Array.isArray(s.students)){ mergeStudents(s.students); }
+                }),
+                wait(9000)
+            ]);
+        }
+        catch(err){}
+
+        student = findStudent(name, studentClass);
+
+    }
 
     const returning = !!student;
 
