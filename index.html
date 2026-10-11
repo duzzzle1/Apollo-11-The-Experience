@@ -3724,28 +3724,95 @@ function loadStudentsLocal(){
 
 }
 
-async function loadStudentsFile(){
+/* The student list comes from the ONLINE database (the Google script, which reads students.json on GitHub;
+   or students.json from the site itself). The copy in this browser is only a fallback when nothing online
+   can be reached, and it is overwritten by the online list every time it loads. */
+let studentsReadyResolve;
+const studentsReady = new Promise(res => { studentsReadyResolve = res; });
+
+async function fetchRemoteStudents(){
+
+    // wait (briefly) for the quiz module, which knows the Google script address
+    for(let i = 0; i < 60 && !window.QuizBoard; i++){
+        await new Promise(r => setTimeout(r, 50));
+    }
+
+    let fromScript = null;
+
+    try{
+        if(window.QuizBoard && window.QuizBoard.fetchStudents){
+            fromScript = await window.QuizBoard.fetchStudents();   // {source, students} | null
+        }
+    }
+    catch(err){}
+
+    if(fromScript && fromScript.source === "github"){
+        return fromScript.students;
+    }
+
+    // students.json from the site (GitHub Pages can lag a minute behind)
+    let list = null;
 
     try{
 
         const response =
-            await fetch(STUDENTS_FILE, { cache:"no-store" });
+            await fetch(STUDENTS_FILE + "?t=" + Date.now(), { cache:"no-store" });
 
-        if(!response.ok){
-            return;
+        if(response.ok){
+            const data = parseStudentsText(await response.text());
+            list = Array.isArray(data) ? data : (data && data.students);
         }
-
-        const data = parseStudentsText(await response.text());
-
-        mergeStudents(
-            Array.isArray(data) ? data : data.students
-        );
-
-        saveStudentsLocal();
 
     }
     catch(err){
-        // Opened from disk / file missing: local copy is used
+        // Opened from disk / file missing
+    }
+
+    if(Array.isArray(list)){
+        return list.concat(fromScript ? fromScript.students : []);
+    }
+
+    return fromScript ? fromScript.students : null;
+
+}
+
+function pendingNewStudents(){
+
+    // students who signed up on this device but whose upload has not finished yet
+    try{
+        return JSON.parse(localStorage.getItem("apollo-quiz-pending") || "[]")
+            .filter(e => e && e.type === "student" && e.name && e.cls)
+            .map(e => ({ name:e.name, class:e.cls, registeredAt:e.registeredAt || null }));
+    }
+    catch(err){
+        return [];
+    }
+
+}
+
+async function loadStudentsFile(){
+
+    try{
+
+        const remote = await fetchRemoteStudents();
+
+        if(Array.isArray(remote)){
+
+            studentsDB.length = 0;
+
+            mergeStudents(remote);
+            mergeStudents(pendingNewStudents());
+
+            saveStudentsLocal();
+
+        }
+
+    }
+    catch(err){
+        // offline: the local copy is used
+    }
+    finally{
+        studentsReadyResolve();
     }
 
 }
@@ -4159,6 +4226,9 @@ async function submitStudentFlow(){
     }
 
     studentFlowBusy = true;
+
+    // make sure the online list has finished loading (so nobody is registered twice)
+    await Promise.race([ studentsReady, wait(7000) ]);
 
     // Already in the database?  -> returning student
     let student = findStudent(name, studentClass);
@@ -14584,7 +14654,7 @@ addEventListener("keydown", e => {
 const interestingButton = $("interestingButton");
 const helpButton = $("helpButton");
 function helpLabel(){
-    helpButton.textContent = L({ar:"التعليمات", en:"Help"});
+    helpButton.textContent = "❓ " + L({ar:"التعليمات", en:"Help"});
 }
 function syncButton(){
     const on = gameSettingsButton.classList.contains("visible");
@@ -17832,6 +17902,12 @@ async function postEntry(e){
     if(j && j.error) throw new Error(j.error);
     return j;
 }
+async function fetchStudents(){
+    if(!LEADERBOARD_URL) return null;
+    const sep = LEADERBOARD_URL.indexOf("?") >= 0 ? "&" : "?";
+    const j = await fetchJson(LEADERBOARD_URL + sep + "action=students&t=" + Date.now());
+    return (j && Array.isArray(j.students)) ? {source: j.source === "github" ? "github" : "sheet", students: j.students} : null;
+}
 async function loadBoards(){
     const local = rankLists(loadLocal());
     if(LEADERBOARD_URL){
@@ -17848,7 +17924,7 @@ async function loadBoards(){
         if(r.ok){
             const d = parseStudentsText(await r.text());
             if(d && d.quiz){
-                source = "file"; lastLists = mergeLists(cleanList(d.quiz), local); return lastLists;
+                source = "file"; lastLists = cleanList(d.quiz); return lastLists;
             }
         }
     }catch(_){}
@@ -18070,7 +18146,7 @@ $q("endBoardBtn").addEventListener("click", openBoard);
     wrap.appendChild(b);
 })();
 
-window.QuizBoard = {lists: () => lastLists, startQuiz, openBoard, closeBoard, _rank: rankLists, _merge: mergeLists, _questions: Q};
+window.QuizBoard = {fetchStudents, lists: () => lastLists, startQuiz, openBoard, closeBoard, _rank: rankLists, _merge: mergeLists, _questions: Q};
 loadBoards().catch(() => {});      // warm up at page load
 })();
 </script>
