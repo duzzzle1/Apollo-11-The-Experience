@@ -2180,6 +2180,34 @@ html:not(.touch) #credits{transform:translateX(-50%) scale(var(--hud,1));transfo
   #menuTitle{font-size:clamp(24px,4vw,36px)}
 }
 </style>
+<style id="skipCss">
+/* ---------- skip button for the two cutscenes ---------- */
+#skipX, #skipHint{ display:none; position:fixed; z-index:1000010; }
+body.canSkip #skipX{ display:flex; }
+body.canSkip #skipHint{ display:block; }
+#skipX{
+    right:calc(16px + env(safe-area-inset-right, 0px));
+    top:max(8px, calc(5vh - 20px * var(--ui, 1)));
+    width:calc(40px * var(--ui, 1)); height:calc(40px * var(--ui, 1));
+    align-items:center; justify-content:center;
+    padding:0; border-radius:50%;
+    border:1px solid rgba(255,255,255,.55); background:rgba(0,0,0,.5); color:#fff;
+    font:calc(19px * var(--ui, 1))/1 system-ui, sans-serif; cursor:pointer;
+    -webkit-tap-highlight-color:transparent; transition:background .2s, transform .2s, border-color .2s;
+}
+#skipX:hover{ background:rgba(255,255,255,.22); border-color:#fff; transform:scale(1.08); }
+#skipX:active{ transform:scale(.94); }
+#skipHint{
+    left:50%; transform:translateX(-50%); max-width:calc(100vw - 150px);
+    top:max(12px, calc(5vh - 11px * var(--ui, 1)));
+    font:calc(14px * var(--ui, 1))/1.3 system-ui, sans-serif; letter-spacing:.03em; text-align:center; white-space:nowrap;
+    overflow:hidden; text-overflow:ellipsis;
+    color:rgba(255,255,255,.88); text-shadow:0 1px 6px #000; pointer-events:none;
+    animation:skipHintDim 1s ease 7s forwards;
+}
+@keyframes skipHintDim{ to{ opacity:.4; } }
+#cinematicFade.fast{ transition-duration:.45s; }
+</style>
 </head>
 
 <body>
@@ -17155,6 +17183,103 @@ function playEndingVideo(){
 
    ===== BACKUP: ENDING VIDEO (disabled) — end ===== */
 
+    /* =====================================================================
+       SKIP BUTTON for both cutscenes (the launch to the Moon, and the ending)
+         - click / tap anywhere, press Esc, or press the X  ->  skip the cutscene
+       ===================================================================== */
+    (function(){
+
+        const x = document.createElement("button");
+        x.id = "skipX"; x.type = "button"; x.textContent = "\u2715";
+
+        const hintEl = document.createElement("div");
+        hintEl.id = "skipHint";
+
+        document.body.appendChild(hintEl);
+        document.body.appendChild(x);
+
+        function labels(){
+            hintEl.textContent = pick({ar:"اضغط في أي مكان لتخطي المشهد", en:"Click anywhere to skip the cutscene"});
+            const l = pick({ar:"تخطي المشهد", en:"Skip the cutscene"});
+            x.setAttribute("aria-label", l);
+            x.title = l;
+        }
+        labels();
+        document.addEventListener("apollo-lang", labels);
+
+        let busy = false;
+
+        // which cutscene is running (if any)
+        function running(){
+            if(cinematicActive){ return "launch"; }
+            if(endingActive && !ea.done){ return "ending"; }
+            return null;
+        }
+
+        // the buttons are only shown while a cutscene is playing; remember (in real time) when it began
+        let seen = null, since = 0;
+
+        setInterval(() => {
+            const k = running();
+            if(k !== seen){ seen = k; since = performance.now(); }
+            document.body.classList.toggle("canSkip", !!k && !busy);
+        }, 150);
+
+        function skip(){
+
+            const r = running();
+
+            // ignore the very first moments, so the click that started the game cannot skip it by accident
+            if(busy || !r || performance.now() - since < 700){ return; }
+
+            busy = true;
+            document.body.classList.remove("canSkip");
+
+            // quick fade to black, then jump to the end of the cutscene
+            cinematicFade.classList.add("fast", "active");
+
+            setTimeout(() => {
+
+                try{
+
+                    if(r === "launch"){
+
+                        if(cinematicActive){ finishApolloCinematic(); }
+
+                    }
+                    else if(endingActive && !ea.done){
+
+                        ea.done = true;
+                        showEndScreen();      // the same finish as when the ending plays to its end
+
+                    }
+
+                }
+                catch(err){
+                    console.error("Skipping the cutscene failed:", err);
+                }
+
+                busy = false;
+
+                setTimeout(() => cinematicFade.classList.remove("fast"), 800);
+
+            }, 480);
+
+        }
+
+        document.addEventListener("click", skip, true);
+
+        document.addEventListener("keydown", e => {
+            if(e.code === "Escape" && running()){ skip(); }
+        }, true);
+
+        x.addEventListener("click", e => { e.stopPropagation(); skip(); });
+
+    })();
+
+    // the sound module (another part of the code) reads the ending's timing from here
+    window.endingInfo = () => ({ T:endT, S2:T_S2, S3:T_S3, S4:T_S4, END:T_END, heat:parseFloat(endHeatEl.style.opacity) || 0 });
+
     window.updateEnding = updateEnding;   // animate() lives outside this IIFE
 })();
 
@@ -17743,20 +17868,19 @@ function update(){
         else if(cinematicPhase === 3){ rumT = .05; rumF = 700; }
         else if(cinematicPhase === 4){ rumT = .025; rumF = 500; }
     }
-    else if(endingActive){
+    else if(endingActive && window.endingInfo){
+        const E = window.endingInfo(), T = E.T;
         ambT = .02;
-        const T = endT;
-        if(T < T_S2){ rumT = .5; rumF = 200 + 300 * Math.min(1, T / 4); }
-        else if(T < T_S3){ rumT = .28; rumF = 220; }
-        else if(T < T_S4){
-            const h = parseFloat(endHeatEl.style.opacity) || 0;
-            rumT = Math.min(.75, .14 + h * 1.4); rumF = 240 + h * 1000;
+        if(T < E.S2){ rumT = .5; rumF = 200 + 300 * Math.min(1, T / 4); }
+        else if(T < E.S3){ rumT = .28; rumF = 220; }
+        else if(T < E.S4){
+            rumT = Math.min(.75, .14 + E.heat * 1.4); rumF = 240 + E.heat * 1000;
         }
         else{ wndT = .14; ambT = .05; }
-        if(T > T_END - 2.5){ wndT *= .3; ambT *= .4; }
+        if(T > E.END - 2.5){ wndT *= .3; ambT *= .4; }
+        if(T > E.END - 1.2) musT = .6;                                     // thank-you screen
     }
     if(!gameStarted && !cinematicActive && !endingActive) musT = .6;        // menu / loading
-    if(endingActive && endT > T_END - 1.2) musT = .6;                      // thank-you screen
     smooth(mus, musT * .75, 1.4);
     if(musT > 0) scheduleMusic();
     smooth(amb, ambT, .8);
@@ -17934,8 +18058,8 @@ function norm(e){
 let source = "local";            // "online" | "file" | "local"
 let lastLists = {score: [], time: []};
 
-async function fetchJson(url){
-    const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 9000);
+async function fetchJson(url, ms){
+    const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), ms || 9000);
     try{
         const r = await fetch(url, {cache: "no-store", signal: ctl.signal});
         if(!r.ok) throw new Error("http " + r.status);
@@ -17965,38 +18089,47 @@ document.addEventListener("apollo-student-new", ev => {
     flushPending().catch(() => {});
 });
 async function postEntry(e){
-    const r = await fetch(LEADERBOARD_URL, {method: "POST", headers: {"Content-Type": "text/plain;charset=utf-8"}, body: JSON.stringify(e)});
-    if(!r.ok) throw new Error("http " + r.status);
-    const j = await r.json();
-    if(j && j.error) throw new Error(j.error);
-    return j;
+    const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 15000);
+    try{
+        const r = await fetch(LEADERBOARD_URL, {method: "POST", headers: {"Content-Type": "text/plain;charset=utf-8"}, body: JSON.stringify(e), signal: ctl.signal});
+        if(!r.ok) throw new Error("http " + r.status);
+        const j = await r.json();
+        if(j && j.error) throw new Error(j.error);
+        return j;
+    } finally { clearTimeout(to); }
 }
 async function fetchStudents(){
     if(!LEADERBOARD_URL) return null;
     const sep = LEADERBOARD_URL.indexOf("?") >= 0 ? "&" : "?";
-    const j = await fetchJson(LEADERBOARD_URL + sep + "action=students&t=" + Date.now());
+    const j = await fetchJson(LEADERBOARD_URL + sep + "action=students&t=" + Date.now(), 6000);
     return (j && Array.isArray(j.students)) ? {source: j.source === "github" ? "github" : "sheet", students: j.students} : null;
 }
-async function loadBoards(){
-    const local = rankLists(loadLocal());
-    if(LEADERBOARD_URL){
-        try{
-            await flushPending();
-            const sep = LEADERBOARD_URL.indexOf("?") >= 0 ? "&" : "?";
-            const j = cleanList(await fetchJson(LEADERBOARD_URL + sep + "action=list&t=" + Date.now()));
-            source = "online"; lastLists = j; return lastLists;
-        }catch(_){ /* fall through */ }
-    }
+async function boardsFromFile(){
     // the copy saved inside students.json on GitHub (key "quiz")
     try{
         const r = await fetch(STUDENTS_FILE + "?t=" + Date.now(), {cache: "no-store"});
         if(r.ok){
             const d = parseStudentsText(await r.text());
-            if(d && d.quiz){
-                source = "file"; lastLists = cleanList(d.quiz); return lastLists;
-            }
+            if(d && d.quiz) return cleanList(d.quiz);
         }
     }catch(_){}
+    return null;
+}
+async function loadBoards(){
+    const local = rankLists(loadLocal());
+    // the file copy is requested at the same time, so a slow or blocked Google script (some school networks block it)
+    // never keeps the board waiting
+    const fileJob = boardsFromFile();
+    if(LEADERBOARD_URL){
+        try{
+            await Promise.race([flushPending(), new Promise(r => setTimeout(r, 3000))]);   // send waiting results first (briefly)
+            const sep = LEADERBOARD_URL.indexOf("?") >= 0 ? "&" : "?";
+            const j = cleanList(await fetchJson(LEADERBOARD_URL + sep + "action=list&t=" + Date.now(), 5000));
+            source = "online"; lastLists = j; return lastLists;
+        }catch(_){ /* fall through */ }
+    }
+    const f = await fileJob;
+    if(f){ source = "file"; lastLists = f; return lastLists; }
     source = "local"; lastLists = local; return lastLists;
 }
 
