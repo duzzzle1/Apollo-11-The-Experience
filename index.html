@@ -1882,7 +1882,9 @@ html[dir="ltr"] #stemPanel{right:auto;left:16px}
 #finishMission.show{display:block}
 #finishMission:hover{background:rgba(124,252,154,.18)}
 #interactHint{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);z-index:8;opacity:0;
- pointer-events:none;text-shadow:2px 2px #000;transition:opacity .25s;direction:var(--dir);white-space:nowrap}
+ pointer-events:none;text-shadow:2px 2px #000;transition:opacity .25s;direction:var(--dir);white-space:nowrap;
+ font-size:clamp(11px,1.2vw,15px);letter-spacing:1px;line-height:1.45;padding:4px 12px;border-radius:8px;background:rgba(0,0,0,.4);
+ max-width:min(620px,86vw);overflow:hidden;text-overflow:ellipsis}
 #infoPanel{position:fixed;inset:0;z-index:900500;background:rgba(0,0,0,.75);display:none;
  align-items:center;justify-content:center;direction:var(--dir);font-family:monospace}
 #infoPanel.visible{display:flex}
@@ -1971,6 +1973,9 @@ kbd{display:inline-block;min-width:1.5em;padding:0 5px;margin:0 2px;border:1px s
  text-shadow:0 0 14px rgba(0,0,0,.9),0 2px 3px #000;opacity:0;pointer-events:none;transition:opacity .9s ease,transform .9s ease;
  direction:var(--dir)}
 #cineCaption.show{opacity:1;transform:translate(-50%,0)}
+#cineCaption.top{bottom:auto;top:calc(10vh + 22px);transform:translate(-50%,-12px)}
+#cineCaption.top.show{transform:translate(-50%,0)}
+#cineCaption.play{font-size:clamp(11px,1.2vw,15px);letter-spacing:1px;line-height:1.45;padding:4px 12px;border-radius:8px;background:rgba(0,0,0,.4);max-width:min(620px,70vw)}
 html.touch body.gameStarted #cineCaption{bottom:auto;top:max(10px, env(safe-area-inset-top, 0px));max-width:min(560px,60vw);font-size:clamp(11px,2.6vw,15px);letter-spacing:1px;line-height:1.4;background:rgba(0,0,0,.45);padding:5px 12px;border-radius:8px}
 #endHud{position:fixed;left:3vw;top:12.5vh;z-index:1000004;display:none;font-family:monospace;font-size:clamp(11px,1.15vw,15px);
  letter-spacing:1.5px;line-height:1.75;color:#bfe9ff;text-shadow:0 0 8px rgba(0,160,255,.65);pointer-events:none;direction:ltr;
@@ -7474,6 +7479,21 @@ let cineCaptionTimer = 0;
 function cineCaption(text, ms){
 
     cineCaptionEl.textContent = text;
+
+    /*
+       Where the subtitle sits:
+         - launch cutscene: at the top (the rocket speed box is at the bottom)
+         - while playing (PC): a little smaller, just above the controls guide
+         - while playing (phone / tablet): at the top (see the touch CSS)
+         - ending cutscene: the original lower third
+    */
+    const playing = gameStarted && !cinematicActive && !endingActive;
+
+    cineCaptionEl.classList.toggle("top", !!cinematicActive);
+    cineCaptionEl.classList.toggle("play", playing);
+
+    placePlayCaption();
+
     cineCaptionEl.classList.add("show");
 
     clearTimeout(cineCaptionTimer);
@@ -7483,6 +7503,25 @@ function cineCaption(text, ms){
             cineCaptionEl.classList.remove("show");
         }, ms);
     }
+
+}
+
+// PC, while playing: the subtitle sits just above the controls guide, and above the small hint line when that is showing
+function placePlayCaption(){
+
+    cineCaptionEl.style.bottom = "";
+
+    if(!cineCaptionEl.classList.contains("play") || window.IS_TOUCH){ return; }
+
+    const cb = document.getElementById("controlsBar");
+    const r = cb ? cb.getBoundingClientRect() : null;
+
+    if(!r || !r.height){ return; }
+
+    const hintEl = document.getElementById("interactHint");
+    const hintShown = hintEl && hintEl.style.opacity === "1" && hintEl.textContent;
+
+    cineCaptionEl.style.bottom = Math.round(window.innerHeight - r.top + (hintShown ? 54 : 8)) + "px";
 
 }
 
@@ -14142,6 +14181,8 @@ function fitHintAboveBar(){
         $("interactHint").style.bottom = (h + 70) + "px";
 
     }
+
+    placePlayCaption();      // keep the subtitle clear of the hint line
 
 }
 
