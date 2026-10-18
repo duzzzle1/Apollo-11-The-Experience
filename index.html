@@ -7519,9 +7519,16 @@ function placePlayCaption(){
     if(!r || !r.height){ return; }
 
     const hintEl = document.getElementById("interactHint");
-    const hintShown = hintEl && hintEl.style.opacity === "1" && hintEl.textContent;
+    const hintShown = hintEl && hintEl.style.opacity == 1 && hintEl.textContent;
 
-    cineCaptionEl.style.bottom = Math.round(window.innerHeight - r.top + (hintShown ? 54 : 8)) + "px";
+    let base = window.innerHeight - r.top + 8;
+
+    if(hintShown){
+        const hr = hintEl.getBoundingClientRect();
+        if(hr.height){ base = Math.max(base, window.innerHeight - hr.top + 6); }   // sit above the hint line
+    }
+
+    cineCaptionEl.style.bottom = Math.round(base) + "px";
 
 }
 
