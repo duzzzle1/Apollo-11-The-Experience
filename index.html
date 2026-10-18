@@ -1971,6 +1971,7 @@ kbd{display:inline-block;min-width:1.5em;padding:0 5px;margin:0 2px;border:1px s
  text-shadow:0 0 14px rgba(0,0,0,.9),0 2px 3px #000;opacity:0;pointer-events:none;transition:opacity .9s ease,transform .9s ease;
  direction:var(--dir)}
 #cineCaption.show{opacity:1;transform:translate(-50%,0)}
+html.touch body.gameStarted #cineCaption{bottom:auto;top:max(10px, env(safe-area-inset-top, 0px));max-width:min(560px,60vw);font-size:clamp(11px,2.6vw,15px);letter-spacing:1px;line-height:1.4;background:rgba(0,0,0,.45);padding:5px 12px;border-radius:8px}
 #endHud{position:fixed;left:3vw;top:12.5vh;z-index:1000004;display:none;font-family:monospace;font-size:clamp(11px,1.15vw,15px);
  letter-spacing:1.5px;line-height:1.75;color:#bfe9ff;text-shadow:0 0 8px rgba(0,160,255,.65);pointer-events:none;direction:ltr;
  white-space:pre;padding:6px 10px;border-left:2px solid rgba(160,220,255,.6);background:linear-gradient(90deg,rgba(0,20,40,.45),transparent)}
@@ -7725,6 +7726,14 @@ function startApolloCinematic(){
 
     cinematicRocket = createCinematicRocket();
 
+    cineCaption(
+        pick({
+            ar:"انطلاق! لقد انطلقت أبولو 11!",
+            en:"Liftoff! We have liftoff of Apollo 11!"
+        }),
+        4200
+    );
+
     /*
        Launch frame: a pad on the surface of the Earth model.
        "Up" is the Earth's own up at the pad (radially outward), and the
@@ -7915,6 +7924,22 @@ player.position.addScaledVector(
 
     menuActive = false;
     menuTransitioning = false;
+
+    // Mission Control welcomes the student to the Moon (once the fade has cleared)
+    setTimeout(() => {
+
+        if(!gameStarted){ return; }
+
+        const who = currentStudent ? currentStudent.name : "";
+
+        const line = pick({
+            ar:"مرحباً بك على القمر" + (who ? " يا " + who : "") + ". أكمل المهام واستكشف!",
+            en:"Welcome to the Moon" + (who ? ", " + who : "") + ". Complete the missions and explore!"
+        });
+
+        cineCaption(line, 5200);
+
+    }, 1400);
 
 }
 
@@ -8241,6 +8266,14 @@ function updateApolloCinematic(dt){
             cin.roll = 0;
 
             cinematicFade.classList.remove("active");
+
+            cineCaption(
+                pick({
+                    ar:"أبولو 11، هنا هيوستن. أنتم جاهزون للتوجه إلى القمر.",
+                    en:"Apollo 11, this is Houston. You are go for the Moon."
+                }),
+                4600
+            );
 
         }
 
@@ -17944,6 +17977,43 @@ function refreshUi(){
     document.addEventListener("apollo-lang", refreshUi);
     refreshUi();
 })();
+})();
+
+/* =========================================================
+   MISSION CONTROL SUBTITLES
+   A short on-screen line (subtitle only, no voice) when a mission task is completed.
+   The cutscene lines (liftoff, "go for the Moon", landing, welcome home...) use the same caption box.
+========================================================= */
+(function(){
+
+const stemList = document.getElementById("stemList");
+
+if(!stemList){ return; }
+
+const lines = [
+    {ar:"أحسنت! مهمة مكتملة.", en:"Well done! Task complete."},
+    {ar:"عمل رائع يا رائد الفضاء!", en:"Great work, astronaut!"},
+    {ar:"ممتاز! تابع الاستكشاف.", en:"Excellent! Keep exploring."}
+];
+
+let last = -1, n = 0;
+
+new MutationObserver(() => {
+
+    const c = stemList.querySelectorAll(".done").length;
+
+    if(last >= 0 && c > last && gameStarted && !cinematicActive && !endingActive){
+
+        const o = lines[n++ % lines.length];
+
+        cineCaption(document.documentElement.lang === "en" ? o.en : o.ar, 3800);
+
+    }
+
+    last = c;
+
+}).observe(stemList, {childList:true, subtree:true, attributes:true, attributeFilter:["class"]});
+
 })();
 
 /* =========================================================
